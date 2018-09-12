@@ -1,0 +1,24 @@
+{
+  "name": "mafia-discord",
+  "scripts": {
+    "watch": "tsc-watch --onSuccess \"node ./dist/src/index.js\"",
+    "build": "tsc",
+    "start": "node dist/src/index.js"
+  },
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^10.9.4",
+    "@types/ramda": "^0.25.38",
+    "@types/safe-json-stringify": "^1.0.1",
+    "discord.js": "^11.4.2",
+    "ramda": "^0.25.0",
+    "safe-json-stringify": "^1.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^1.18.4",
+    "tsc-watch": "^1.0.27",
+    "typescript": "^3.0.3"
+  }
+}
