@@ -1,14 +1,6 @@
 import Discord from 'discord.js'
+import { FakePlayers, MyselfID } from './mock'
 import R from 'ramda'
-
-// guild: Discord.Guild
-// discordRole: Discord.Role
-// name: string
-// isGameRole: boolean
-// canVote: boolean // if this role can vote (doesn't mean that it can vote if it has already voted)
-// channel: Channel
-// type: RoleType
-// limit: number
 
 function inspect(obj: object) {
   console.log(JSON.stringify(obj, function(key, value) {
@@ -329,7 +321,7 @@ class GameManager {
   handleVote(game: Game, message: Discord.Message, voteName: string) {
     switch (game.phase) {
       case Phase.Pregame:
-        game.sendMessage('Lobby', 'No game is in progress')
+        game.sendMessage('lobby', 'No game is in progress')
         break;
       case Phase.Night:
         const author = message.author
@@ -344,19 +336,30 @@ class GameManager {
         }
 
         let roleVoting = game.voting[player.role.name]
-        let voteMember = game.guild.members.find(m => m.user.username === voteName)
+        // find vote destination player by name
+        let voteMember = game.findPlayerByName(voteName)
+        
         if (!voteMember) {
           player.role.channel.send(`${author}, could not find a player named ${voteName}`)
           return
         }
+        if (roleVoting.alreadyVoted[player.id]) {
+          player.role.channel.send(`${author}, you have already voted for ${voteMember.id}`)
+          return
+        }
 
         const voteID = voteMember.id
+        if (!(voteID in roleVoting.votes)) {
+          player.role.channel.send(`${author}, you cannot vote for ${voteMember.id}`)
+          return
+        }
+
         // increment how many votes this player has
         roleVoting.votes[voteID]++
         // set author already voted true
         roleVoting.alreadyVoted[player.id] = true
 
-        player.role.channel.send(`${author} has voted for ${null}`)
+        player.role.channel.send(`${author} has voted for ${voteMember.id}`)
         break;
       case Phase.Day:
         // lynch
@@ -368,35 +371,7 @@ class GameManager {
   }
 
   fillWithFakePlayers(game: Game, guild: Discord.Guild) {
-    // console.log('game:', game, 'guild:', guild);
-    
-    let fakePlayers = [
-    {
-      id: '<none>0',
-      name: 'One',
-    },
-    {
-      id: '<none>1',
-      name: 'Two',
-    },
-    {
-      id: '<none>2',
-      name: 'Three',
-    },
-    {
-      id: '<none>3',
-      name: 'Four',
-    },
-    {
-      id: '<none>4',
-      name: 'Five',
-    },
-    {
-      id: '<none>5',
-      name: 'Six',
-    },
-    ]
-    fakePlayers.forEach(p => {
+    FakePlayers.forEach(p => {
       const fakeUser = new Discord.GuildMember(guild, { id: '<none>' })
       game.addPlayer(fakeUser, p.id, p.name)  
     })
@@ -466,10 +441,6 @@ class Game {
     this.voting = {}
   }
 
-  findDiscordRole(name: string) {
-
-  }
-
   findRole(name: string): Role {
     // case insensitive
     return this.roles.find(ro => ro.name.toLowerCase() === name.toLowerCase())!
@@ -477,7 +448,6 @@ class Game {
 
   findChannel(roleName: string) {
     let channel = (this.findRole(roleName)!).channel
-    inspect(channel)
     return channel
   }
 
@@ -492,7 +462,7 @@ class Game {
 
   startLookingForPlayers() {
     if (this.isGameStarted) {
-      this.sendMessage('Lobby', 'A game is already in progress')
+      this.sendMessage('lobby', 'A game is already in progress')
       return
     }
     if (this.isLookingForPlayers) {
@@ -505,18 +475,18 @@ class Game {
     this.unassignedPlayers = []
     this.players = []
 
-    this.sendMessage('Lobby', `Starting new game: looking for ${this.playerLimit} players...`)
+    this.sendMessage('lobby', `Starting new game: looking for ${this.playerLimit} players...`)
   }
 
   start() {
     this.isLookingForPlayers = false
     this.isGameStarted = true
 
-    this.sendMessage('Lobby', 'Starting game...')
+    this.sendMessage('lobby', 'Starting game...')
     // some sort of timer here
 
     // assign roles
-    this.assignRoles()
+    this.randomlyAssignRoles()
 
     this.setPhase(Phase.Night)
   }
@@ -527,13 +497,11 @@ class Game {
     
     console.log('adding', player.role.name, 'to', player.name)
     await player.member.removeRoles(player.member.roles)
-    console.log('discordRole:', discordRole)
-    
     await player.member.addRole(discordRole)
   }
 
   setPhase(phase: Phase) {
-    this.sendMessage('Lobby', `Setting phase: ${phase}`)
+    this.sendMessage('lobby', `Setting phase: ${Phase[phase]}`)
     this.phase = phase
 
     this.voting = {}
@@ -556,6 +524,10 @@ class Game {
 
       // TODO: maybe make async
       role.channel.bulkDelete(100)
+
+      if (role.canVote) {
+        this.setVoteOptions(role.name)
+      }
     }
 
     // move each player to the channel that belongs to his assigned role
@@ -566,26 +538,51 @@ class Game {
     })
 
     // handle mafia actions
-    this.status('Mafia')
+    this.status('mafia')
   }
 
   // randomly assigns a GAME role to all the players in the game
   // this does not assign the discord users the actual discord roles, which
   // happens when a phase is set.
   // moves unassigned players to the assigned player list
-  assignRoles() {
-    let assignableRoles = [...this.roles.filter(ro => ro.isGameRole)!]
+  randomlyAssignRoles() {
+    const DebugForce = true
 
-    // let removedRoles: {[index:string]: boolean} = {}
+    let assignableRoles = [...this.roles.filter(ro => ro.isGameRole)!]
+    
+
+    // TODO: debug remove
+    // force role on myself
+    if (DebugForce) {
+      const myselfPlayer = this.unassignedPlayers.find(pl => pl.id === MyselfID)!
+      if (myselfPlayer.id === MyselfID) {
+        let forcedRole = assignableRoles.find(ro => ro.type === RoleType.Mafia)!
+        let forcedRoleIdx = assignableRoles.findIndex(ro => ro.type === RoleType.Mafia)!
+
+        myselfPlayer.role = forcedRole
+        this.players.push({
+          ...myselfPlayer,
+          role: myselfPlayer.role
+        })
+
+        // decrement role amount
+        forcedRole.limit--
+      }
+    }
 
     for (let i = 0; i < this.playerLimit; i++) {
+      let uap = this.unassignedPlayers[i]
+      // we're forcing outselves into a role, don't add again
+      if (DebugForce) {
+        if (uap.id === MyselfID) {
+          continue
+        }
+      }
+
       // get random role
       const randomRoleIdx = getRandomInt(assignableRoles.length)
-      // cast partial role to full role
       let randomRole = assignableRoles[randomRoleIdx]
 
-      // give role
-      let uap = this.unassignedPlayers[i]
       uap.role = randomRole
       this.players.push({
         ...uap,
@@ -596,12 +593,9 @@ class Game {
       randomRole.limit--
 
       if (randomRole.limit === 0) {
-        // removedRoles[randomRole.discordRole.id] = true
         assignableRoles.splice(randomRoleIdx, 1)
       }
     }
-
-    // inspect(this.players)
   }
 
   // at the start of each phase, set available vote options (per channel)
@@ -621,16 +615,24 @@ class Game {
     })
   }
 
+  findPlayerByName(name: string) {
+    let fakePlayer = FakePlayers.find(fp => fp.name === name)!
+    if (fakePlayer) {
+      return FakePlayers.find(fp => fp.id === fakePlayer.id)
+    }
+
+    return this.guild.members
+      .find(m => m.user.username.toLowerCase() === name.toLowerCase())
+  }
+
   findPlayer(id: string): Player | undefined {
     return this.players.find(pl => pl.id === id)
   }
 
   getCastVotes(channel: Channel): string {
     const channelName = getChanName(channel)
-    
-    console.log('channelName:', channelName)
-    inspect(this.voting)
     const votes = this.voting[channelName].votes
+    console.log('votes:', votes)
 
     let castVotes = ''
     for (let playerID in votes) {
@@ -657,7 +659,7 @@ class Game {
 Have: [${this.unassignedPlayers.map(p => p.name).toString()}]
 Looking for ${this.playerLimit - this.unassignedPlayers.length} more players`
 
-      this.sendMessage('Lobby', statusText)
+      this.sendMessage('lobby', statusText)
       return
     }
 
@@ -667,7 +669,7 @@ Looking for ${this.playerLimit - this.unassignedPlayers.length} more players`
       break
     case Phase.Night:
       switch (channelName) {
-      case 'Mafia':
+      case 'mafia':
         let mafiaStatusText = `You are the mafia.\n\nVote on who to kill tonight by doing \`.vote <number>\`\n\nOptions are:\n`
         mafiaStatusText += this.getCastVotes(channel) + '\n'
 
@@ -687,16 +689,16 @@ Looking for ${this.playerLimit - this.unassignedPlayers.length} more players`
 
   addPlayer(member: Discord.GuildMember, id: string, name: string, ) {
     if (this.isGameStarted) {
-      this.sendMessage('Lobby', 'A game is already in progress')
+      this.sendMessage('lobby', 'A game is already in progress')
       return
     }
     if (!this.isLookingForPlayers) {
-      this.sendMessage('Lobby', 'No game currently scheduled')
+      this.sendMessage('lobby', 'No game currently scheduled')
       return
     }
     // player already joined queue
     if (this.unassignedPlayers.find(player => player.id === id)) {
-      this.sendMessage('Lobby', name+', you have already joined the queue!')
+      this.sendMessage('lobby', name+', you have already joined the queue!')
       return
     }
 
@@ -707,7 +709,7 @@ Looking for ${this.playerLimit - this.unassignedPlayers.length} more players`
       name: name,
       role: undefined,
     })
-    this.sendMessage('Lobby', name+' joined the game')
+    this.sendMessage('lobby', name+' joined the game')
 
     // if we have all the players needed to start the game
     if (this.unassignedPlayers.length === this.playerLimit) {
