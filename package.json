@@ -12,12 +12,14 @@
     "@types/node": "^10.9.4",
     "@types/ramda": "^0.25.38",
     "@types/safe-json-stringify": "^1.0.1",
+    "@types/source-map-support": "^0.4.1",
     "discord.js": "^11.4.2",
     "ramda": "^0.25.0",
     "safe-json-stringify": "^1.2.0"
   },
   "devDependencies": {
     "nodemon": "^1.18.4",
+    "source-map-support": "^0.5.9",
     "tsc-watch": "^1.0.27",
     "typescript": "^3.0.3"
   }

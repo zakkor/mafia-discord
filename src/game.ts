@@ -1,56 +1,192 @@
 import Discord from 'discord.js'
 import R from 'ramda'
-import safeJsonStringify from 'safe-json-stringify'
+
+// guild: Discord.Guild
+// discordRole: Discord.Role
+// name: string
+// isGameRole: boolean
+// canVote: boolean // if this role can vote (doesn't mean that it can vote if it has already voted)
+// channel: Channel
+// type: RoleType
+// limit: number
 
 function inspect(obj: object) {
-  // console.log(JSON.stringify(obj, function( key, value) {
-  //   if (key == 'parent') { 
-  //     return value.id 
-  //   }
-  //   return value
-  // }))
-  console.log('/--inspecting:')
-  console.log(safeJsonStringify(obj))
-  console.log(':inspecting--/')
+  console.log(JSON.stringify(obj, function(key, value) {
+    switch (key) {
+    case 'guild':
+      return '[DiscordGuild '+value.id+']'
+    case 'channel':
+      return '[DiscordChannel '+value.id+']'
+    case 'discordRole':
+      return '[DiscordRole '+value.id+']'
+    }
+    return value
+  }, 2))
+}
+
+function getChanName(chan: Discord.Channel): string {
+  return (<Discord.TextChannel>chan).name
 }
 
 function getRandomInt(max: number) {
   return Math.floor(Math.random() * Math.floor(max));
 }
 
-type DiscordRoleID = string
-class DiscordUser extends Discord.User { }
-
-interface Role {
-  name: string
-  id: DiscordRoleID
-  amount: number
+enum RoleType {
+  None,
+  Villager,
+  Mafia,
+  Cop,
+  Doctor
 }
 
-const GameSettings: {roles: Role[]} = {
+type Channel = Discord.TextChannel | Discord.DMChannel | Discord.GroupDMChannel
+
+interface RoleConfig {
+  id: string
+  type: RoleType
+  isGameRole: boolean
+  channelID: string
+  limit: number
+}
+
+class Role {
+  guild: Discord.Guild
+  discordRole: Discord.Role
+  name: string
+  isGameRole: boolean
+  canVote: boolean // if this role can vote (doesn't mean that it can vote if it has already voted)
+  channel: Channel
+  type: RoleType
+  limit: number
+
+  async uppercaseDiscordChannelName(channel: Discord.Channel) {
+    let name = (<Discord.TextChannel>channel).name
+    name = name[0].toUpperCase()
+    await (<Discord.TextChannel>channel).setName(name)
+  }
+
+  constructor(guild: Discord.Guild, cfg: RoleConfig) {
+    this.guild = guild
+
+    this.discordRole = this.guild.roles.find(ro => ro.id === cfg.id)!
+    this.channel = (<Channel>this.guild.channels.find(ch => ch.id === cfg.channelID)!)
+    this.name = this.discordRole.name
+    this.isGameRole = cfg.isGameRole
+    this.type = cfg.type
+    this.limit = cfg.limit
+
+    this.canVote = true
+    switch (this.type) {
+    case RoleType.None:
+    case RoleType.Villager:
+      this.canVote = false
+      break;
+    }
+  }
+}
+
+interface GameConfig {
+  roles: RoleConfig[]
+}
+
+const GameConfig: GameConfig = {
   roles: [
     {
-      name: 'villager',
-      id: '489520599819878400',
-      amount: 3,
-    },
-    { 
-      name: 'mafia',
-      id: '489520538297958404',
-      amount: 2,
-    }, 
-    {
-      name: 'cop',
-      id: '489520649887285248',
-      amount: 1,
+      id: '490567542398648320',
+      type: RoleType.None,
+      channelID: '489106226244878340',
+      isGameRole: false, // will not be randomly assigned to players at the start
+      limit: -1
     },
     {
-      name: 'doctor',
-      id: '489520695357865986',
-      amount: 1,
-    }
+      id: '490609185524809729',
+      type: RoleType.None,
+      channelID: '489727884634619904',
+      isGameRole: false,
+      limit: -1
+    },
+    {
+      id: '489106307832610836',
+      type: RoleType.Villager,
+      channelID: '489727930679689216',
+      isGameRole: true,
+      limit: 3
+    },
+    {
+      id: '489106278237601792',
+      type: RoleType.Mafia,
+      channelID: '489727867005960194',
+      isGameRole: true,
+      limit: 2
+    },
+    {
+      id: '489520383511363606',
+      type: RoleType.Cop,
+      channelID: '489727972274601994',
+      isGameRole: true,
+      limit: 1
+    },
+    {
+      id: '489520463546941452',
+      type: RoleType.Doctor,
+      channelID: '489727998640259095',
+      isGameRole: true,
+      limit: 1
+    },
   ]
 }
+
+// const GameSettings: {
+//   channels: {[index:string]: string}
+//   roles: PartialRole[],
+// } = {
+//   channels: {
+//     lobby: '',
+//     villager: '489727930679689216',
+//     mafia: '489727867005960194',
+//     cop: '489727972274601994',
+//     doctor: '489727998640259095',
+//     day: '489727884634619904',
+//   },
+//   roles: [
+//     {
+//       name: 'Lobby',
+//       channel: 'lobby',
+//       type: RoleType.None,
+//       id: '',
+//       limit: 0,
+//     },
+//     {
+//       name: 'Villager',
+//       channel: 'villager',
+//       type: RoleType.Villager,
+//       id: '489106307832610836',
+//       limit: 3,
+//     },
+//     { 
+//       name: 'Mafia',
+//       channel: 'mafia',
+//       type: RoleType.Mafia,
+//       id: '489106278237601792',
+//       limit: 2,
+//     }, 
+//     {
+//       name: 'Cop',
+//       channel: 'cop',
+//       type: RoleType.Cop,
+//       id: '489520383511363606',
+//       limit: 1,
+//     },
+//     {
+//       name: 'Doctor',
+//       channel: 'doctor',
+//       type: RoleType.Doctor,
+//       id: '489520463546941452',
+//       limit: 1,
+//     }
+//   ]
+// }
      
 class GameManager {
   // the discord client
@@ -69,9 +205,63 @@ class GameManager {
       let cont = R.clone(message.content)
 
       const guildID = message.guild.id
+      const guild = message.guild
       if (!(guildID in this.games)) {
-        const lobbyChannel = message.channel
-        this.games[guildID] = new Game(lobbyChannel)
+        // initialize channels and roles from config
+        // let channels: Channels = {}
+
+        let roles = []
+        for (let roleCfg of GameConfig.roles) {
+          let role = new Role(guild, roleCfg) 
+          roles.push(role)
+        }
+        // for (let chanCfg of GameConfig) {
+        //   // find discord channel by id
+        //   let channelRef = guild.channels.find(ch => ch.id === chanCfg.id)!
+        //   let roleRef = guild.roles.find(ro => ro.id === chanCfg.role.id)
+        //   // console.log('channel.name:', channel.name)
+
+        //   const role = <Role>{
+
+        //   }
+          
+        //   const role = <Role>GameSettings.roles.find(ro => {
+        //     console.log('ro.channel:', ro.channel)
+        //     console.log('channel.name:', channel.name)
+            
+            
+        //     return ro.channel === channel.name
+        //   })!
+        //   role.roleRef = guild.roles.find(discRole => discRole.id === role.id)!
+           
+        //   channels[channelName] = {
+        //     ref: <Discord.TextChannel>channel,
+        //     role: role,
+        //   } 
+        // }
+
+        // Object.keys(GameSettings.channels).forEach(channelName => {
+        //   // console.log('channelName:', channelName)
+          
+        //   let channelID = GameSettings.channels[channelName]
+        //   let channel = guild.channels.find(ch => ch.id === channelID)
+        //   // console.log('channel.name:', channel.name)
+          
+        //   const role = <Role>GameSettings.roles.find(ro => {
+        //     console.log('ro.channel:', ro.channel)
+        //     console.log('channel.name:', channel.name)
+            
+            
+        //     return ro.channel === channel.name
+        //   })!
+        //   role.roleRef = guild.roles.find(discRole => discRole.id === role.id)!
+           
+        //   channels[channelName] = {
+        //     ref: <Discord.TextChannel>channel,
+        //     role: role,
+        //   } 
+        // })
+        this.games[guildID] = new Game(guild, roles)
       }
       let game = this.games[guildID]
 
@@ -97,66 +287,147 @@ class GameManager {
         game.startLookingForPlayers()  
         break
       case 'join':
-        const user = message.author
-        const playerID = user.id
-        const playerName = user.username
+        const user = message.member
+        const playerID = user.user.id
+        const playerName = user.user.username
         game.addPlayer(user, playerID, playerName)  
         break
       case 'status':
-        game.status()  
+        game.status((<Discord.TextChannel>message.channel).name)  
+        game.players[0]
         break
+      case 'vote':
+        if (args.length === 0) {
+          message.channel.send(`${message.author}, you must mention the user you want to vote for`)
+        }
+        this.handleVote(game, message, args[0])
+        break
+      // debug stuff
       case 'fill':
-        let fakePlayers = [
-        {
-          id: '0',
-          name: 'One',
-        },
-        {
-          id: '1',
-          name: 'Two',
-        },
-        {
-          id: '2',
-          name: 'Three',
-        },
-        {
-          id: '3',
-          name: 'Four',
-        },
-        {
-          id: '4',
-          name: 'Five',
-        },
-        {
-          id: '5',
-          name: 'Six',
-        },
-        ]
-        fakePlayers.forEach(p => {
-          const fakeUser = new DiscordUser(this.disc, { id: '<pretend>' })
-          game.addPlayer(fakeUser, p.id, p.name)  
-        })
+        this.fillWithFakePlayers(game, guild)
         break
       case 'ins':
-        inspect(game.players)
+        inspect(game.roles)
+        break
+      case 'qs':
+        game.startLookingForPlayers()  
+        this.fillWithFakePlayers(game, guild)
+        const myID = '164469337258721280'
+        const myRef = guild.members.find(m => m.id === myID)
+        game.addPlayer(myRef, myRef.user.id, myRef.user.username)  
+        break
+      case 'phasen':
+        game.setPhase(Phase.Night)
+        break
+      case 'phased':
+        game.setPhase(Phase.Day)
+        break
       }
+    })
+  }
+
+  handleVote(game: Game, message: Discord.Message, voteName: string) {
+    switch (game.phase) {
+      case Phase.Pregame:
+        game.sendMessage('Lobby', 'No game is in progress')
+        break;
+      case Phase.Night:
+        const author = message.author
+
+        // find in game player and check if his role can vote
+        let player = game.findPlayer(author.id)
+        if (!player) {
+          return
+        }
+        if (!player.role.canVote) {
+          return
+        }
+
+        let roleVoting = game.voting[player.role.name]
+        let voteMember = game.guild.members.find(m => m.user.username === voteName)
+        if (!voteMember) {
+          player.role.channel.send(`${author}, could not find a player named ${voteName}`)
+          return
+        }
+
+        const voteID = voteMember.id
+        // increment how many votes this player has
+        roleVoting.votes[voteID]++
+        // set author already voted true
+        roleVoting.alreadyVoted[player.id] = true
+
+        player.role.channel.send(`${author} has voted for ${null}`)
+        break;
+      case Phase.Day:
+        // lynch
+        game.sendMessage('Day', 'supposed to lynch here')
+        break;
+      default:
+        break;
+    }
+  }
+
+  fillWithFakePlayers(game: Game, guild: Discord.Guild) {
+    // console.log('game:', game, 'guild:', guild);
+    
+    let fakePlayers = [
+    {
+      id: '<none>0',
+      name: 'One',
+    },
+    {
+      id: '<none>1',
+      name: 'Two',
+    },
+    {
+      id: '<none>2',
+      name: 'Three',
+    },
+    {
+      id: '<none>3',
+      name: 'Four',
+    },
+    {
+      id: '<none>4',
+      name: 'Five',
+    },
+    {
+      id: '<none>5',
+      name: 'Six',
+    },
+    ]
+    fakePlayers.forEach(p => {
+      const fakeUser = new Discord.GuildMember(guild, { id: '<none>' })
+      game.addPlayer(fakeUser, p.id, p.name)  
     })
   }
 }
 
-interface Player {
-  userRef: Discord.User
+interface UnassignedPlayer {
+  member: Discord.GuildMember
   id: string
   name: string
-  role: string
+  role: Role | undefined
+}
+interface Player extends UnassignedPlayer {
+  role: Role
+}
+
+enum Phase {
+  Pregame,
+  Night,
+  Day,
+}
+
+interface Channels {
+  [index:string]: { ref: Channel, role: Role } // channel belongs to a role
 }
 
 // A game on one server
 class Game {
+  guild: Discord.Guild
   // bot prefix. configurable per server
-  prefix: string
-  // holds the players
-  players: Player[]
+  prefix: string = '.'
   // how many players are required to start a game
   playerLimit: number
   // are we currently looking for players?
@@ -164,125 +435,282 @@ class Game {
   // is the game in progress?
   isGameStarted: boolean
   // various channels
-  channels: { lobby: Discord.TextChannel | Discord.DMChannel | Discord.GroupDMChannel }
-
-  constructor(lobby: Discord.TextChannel | Discord.DMChannel | Discord.GroupDMChannel) {
-    this.prefix = '.'
-    this.playerLimit = 7
-    this.players = []
-    this.isLookingForPlayers = false
-    this.isGameStarted = false
-    this.channels = {
-      lobby: lobby
+  roles: Role[]
+  // used for caching
+  private channelCache: {[index:string]: Channel}
+  // holds players until they are assigned a role
+  unassignedPlayers: UnassignedPlayer[]
+  // holds the players
+  players: Player[]
+  // what phase the game is in
+  phase: Phase
+  // holds voting stuff
+  voting: {
+    [index: string]: {
+      votes: { [index:string]: number }
+      alreadyVoted: { [index:string]: boolean }
     }
   }
 
-  startLookingForPlayers () {
+  constructor(guild: Discord.Guild, roles: Role[]) {
+    this.guild = guild
+    this.roles = roles
+    this.channelCache = {}
+    // move to init
+    this.playerLimit = 7
+    this.unassignedPlayers = []
+    this.players = []
+    this.phase = Phase.Pregame
+    this.isLookingForPlayers = false
+    this.isGameStarted = false
+    this.voting = {}
+  }
+
+  findDiscordRole(name: string) {
+
+  }
+
+  findRole(name: string): Role {
+    // case insensitive
+    return this.roles.find(ro => ro.name.toLowerCase() === name.toLowerCase())!
+  }
+
+  findChannel(roleName: string) {
+    let channel = (this.findRole(roleName)!).channel
+    inspect(channel)
+    return channel
+  }
+
+  findChannelByID(channelID: string) {
+    return this.guild.channels.find(ch => ch.id === channelID)!
+  }
+
+  sendMessage(roleName: string, contents: string) {
+    const role = this.findRole(roleName)
+    role.channel.send(contents)
+  }
+
+  startLookingForPlayers() {
     if (this.isGameStarted) {
-      this.channels.lobby.send('A game is already in progress')
+      this.sendMessage('Lobby', 'A game is already in progress')
       return
     }
     if (this.isLookingForPlayers) {
-      this.status()
+      this.status('Lobby')
       return
     }
 
     // start looking for players
     this.isLookingForPlayers = true
+    this.unassignedPlayers = []
     this.players = []
 
-    this.channels.lobby.send(`Starting new game: looking for ${this.playerLimit} players...`)
+    this.sendMessage('Lobby', `Starting new game: looking for ${this.playerLimit} players...`)
   }
 
   start() {
     this.isLookingForPlayers = false
     this.isGameStarted = true
 
-    this.channels.lobby.send('Starting game...')
+    this.sendMessage('Lobby', 'Starting game...')
     // some sort of timer here
 
     // assign roles
     this.assignRoles()
+
+    this.setPhase(Phase.Night)
   }
 
-  setPlayerRole(player: Player, role: Role) {
-    player.role = role.name
+
+  async movePlayerToRoleChannel(player: Player) {
+    const discordRole = player.role.discordRole
     
+    console.log('adding', player.role.name, 'to', player.name)
+    await player.member.removeRoles(player.member.roles)
+    console.log('discordRole:', discordRole)
+    
+    await player.member.addRole(discordRole)
   }
 
-  assignRoles() {
-    let roles = R.clone(GameSettings.roles)
+  setPhase(phase: Phase) {
+    this.sendMessage('Lobby', `Setting phase: ${phase}`)
+    this.phase = phase
 
-    for (let i = 0; i < this.playerLimit; i++) {
-      // get random role
-      const randomRoleIdx = getRandomInt(roles.length)
-      let randomRole = roles[randomRoleIdx]
+    this.voting = {}
+    for (let role of this.roles) {
+      if (!role.canVote) {
+        continue
+      }
 
-      // give role
-      this.players[i].role = randomRole.name
-      // decrement role amount
-      randomRole.amount--
-
-      if (randomRole.amount === 0) {
-        roles.splice(randomRoleIdx, 1)
+      this.voting[role.name] = {
+        votes: {},
+        alreadyVoted: {},
       }
     }
 
-    inspect(this.players)
+    // delete 100 messages from all channels except lobby
+    for (let role of this.roles) {
+      if (role.type === RoleType.None) {
+        continue
+      }
+
+      // TODO: maybe make async
+      role.channel.bulkDelete(100)
+    }
+
+    // move each player to the channel that belongs to his assigned role
+    this.players.forEach(player => {
+      if (!player.id.includes('<none>')) {
+        this.movePlayerToRoleChannel(player)
+      }
+    })
+
+    // handle mafia actions
+    this.status('Mafia')
   }
 
-  status() {
+  // randomly assigns a GAME role to all the players in the game
+  // this does not assign the discord users the actual discord roles, which
+  // happens when a phase is set.
+  // moves unassigned players to the assigned player list
+  assignRoles() {
+    let assignableRoles = [...this.roles.filter(ro => ro.isGameRole)!]
+
+    // let removedRoles: {[index:string]: boolean} = {}
+
+    for (let i = 0; i < this.playerLimit; i++) {
+      // get random role
+      const randomRoleIdx = getRandomInt(assignableRoles.length)
+      // cast partial role to full role
+      let randomRole = assignableRoles[randomRoleIdx]
+
+      // give role
+      let uap = this.unassignedPlayers[i]
+      uap.role = randomRole
+      this.players.push({
+        ...uap,
+        role: uap.role
+      })
+
+      // decrement role amount
+      randomRole.limit--
+
+      if (randomRole.limit === 0) {
+        // removedRoles[randomRole.discordRole.id] = true
+        assignableRoles.splice(randomRoleIdx, 1)
+      }
+    }
+
+    // inspect(this.players)
+  }
+
+  // at the start of each phase, set available vote options (per channel)
+  // we just set this.voting[chanName].votes[playerID] = 0
+  setVoteOptions(roleName: string) {
+    const channelRoleType = this.findRole(roleName).type
+
+    // villagers and spectators can't vote
+    if (channelRoleType === RoleType.Villager
+     || channelRoleType === RoleType.None) {
+      return
+    }
+
+    const others = this.players.filter(pl => pl.role.type !== channelRoleType)
+    others.forEach(pl => {
+      this.voting[roleName].votes[pl.id] = 0
+    })
+  }
+
+  findPlayer(id: string): Player | undefined {
+    return this.players.find(pl => pl.id === id)
+  }
+
+  getCastVotes(channel: Channel): string {
+    const channelName = getChanName(channel)
+    
+    console.log('channelName:', channelName)
+    inspect(this.voting)
+    const votes = this.voting[channelName].votes
+
+    let castVotes = ''
+    for (let playerID in votes) {
+      const numVotes = votes[playerID]
+      const player = this.findPlayer(playerID)!
+
+      let text = `- ${player.name}`
+      if (numVotes && numVotes > 0) {
+        text += `: ${numVotes} votes`
+      }
+      text += '\n'
+
+      castVotes += text
+    }
+    return castVotes
+  }
+
+  status(channelName: string) {
+    const channel = this.findChannel(channelName)
+
     if (this.isLookingForPlayers) {
       const statusText =
       `Currently looking for players
-Have: [${this.players.map(p => p.name).toString()}]
-Looking for ${this.playerLimit - this.players.length} more players`
+Have: [${this.unassignedPlayers.map(p => p.name).toString()}]
+Looking for ${this.playerLimit - this.unassignedPlayers.length} more players`
 
-      this.channels.lobby.send(statusText)
+      this.sendMessage('Lobby', statusText)
       return
+    }
+
+    switch (this.phase) {
+    case Phase.Day:
+      // lynch status
+      break
+    case Phase.Night:
+      switch (channelName) {
+      case 'Mafia':
+        let mafiaStatusText = `You are the mafia.\n\nVote on who to kill tonight by doing \`.vote <number>\`\n\nOptions are:\n`
+        mafiaStatusText += this.getCastVotes(channel) + '\n'
+
+        channel.send(mafiaStatusText)
+        break
+      case 'cop':
+        break
+      case 'doctor':
+        break
+      default:
+        console.log('error: unrecognised channel name', channelName)
+        break
+      }
+      break
     }
   }
 
-  // _addFakePlayer = (msg: Discord.Message) => {
-  //   // add the player to the list
-  //   this.players.push({
-  //     id: 'fake_id',
-  //     name: 'FakeName',
-  //   })
-
-  //   // if we have all the players needed to start the game
-  //   if (this.players.length === this.playerLimit) {
-  //     // start the game
-  //     this.start()
-  //   }
-  // }
-
-  addPlayer(userRef: Discord.User, id: string, name: string, ) {
+  addPlayer(member: Discord.GuildMember, id: string, name: string, ) {
     if (this.isGameStarted) {
-      this.channels.lobby.send('A game is already in progress')
+      this.sendMessage('Lobby', 'A game is already in progress')
       return
     }
     if (!this.isLookingForPlayers) {
-      this.channels.lobby.send('No game currently scheduled')
+      this.sendMessage('Lobby', 'No game currently scheduled')
       return
     }
     // player already joined queue
-    if (this.players.find(player => player.id === id)) {
-      this.channels.lobby.send(name+', you have already joined the queue!')
+    if (this.unassignedPlayers.find(player => player.id === id)) {
+      this.sendMessage('Lobby', name+', you have already joined the queue!')
       return
     }
 
     // add the player to the list
-    this.players.push({
-      userRef: userRef,
+    this.unassignedPlayers.push({
+      member: member,
       id: id,
       name: name,
-      role: 'none',
+      role: undefined,
     })
-    this.channels.lobby.send(name+' joined the game')
+    this.sendMessage('Lobby', name+' joined the game')
 
     // if we have all the players needed to start the game
-    if (this.players.length === this.playerLimit) {
+    if (this.unassignedPlayers.length === this.playerLimit) {
       // start the game
       this.start()
     }
