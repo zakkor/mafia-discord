@@ -18,8 +18,16 @@ class GameManager {
     this.registerMessageHandler()
   }
 
+  endGame(game: Game) {
+    delete this.games[game.guild.id]
+  }
+
   registerMessageHandler() {
     this.disc.on('message', message => {
+      if (!message.guild) {
+        return
+      }
+
       let cont = R.clone(message.content)
 
       const guildID = message.guild.id
@@ -30,7 +38,7 @@ class GameManager {
           let role = new Role(guild, roleCfg) 
           roles.push(role)
         }
-        this.games[guildID] = new Game(guild, roles)
+        this.games[guildID] = new Game(this, guild, roles)
       }
       let game = this.games[guildID]
 
@@ -52,8 +60,35 @@ class GameManager {
       const args = split.slice(1)
 
       switch (cmd) {
+      case 'help':
+        const helpText =
+`Rules:
+At the start of the game, everyone is assigned a role:
+- 3 villagers: the villager is sided with the town, and has no special actions during the night
+- 2 mafia: they are sided with the mafia (duh), and during the night they can chat and vote for a person to be killed
+- 1 doctor: the doctor is sided with the town, and during the night he can choose a person to save, preventing them being killed by mafia that night. They can choose themselves.
+- 1 cop: the cop is sided with the town, and during the night he can choose a person to investigate. The next day they will receive a message letting them know if that person is innocent or not.
+
+During the day, the town must discuss and try to figure out who is guilty and who is innocent.
+During the day, everyone can vote for someone to lynch (kill). The person with the most votes will be killed, and the next night will begin
+The mafia win when they outnumber the innocent people. The town wins when all mafia is killed.
+Note that during the game you can whisper people (Discord DM). This is a legit game mechanic and is not considered cheating.
+
+Commands:
+\`.start\` - starts a new game
+\`.join\` - join the queue for a new game
+\`.leave\` - leave the queue
+\`.status\` - see what's happening at any phase in the game
+\`.vote\` - during the night, roles which have actions can use this command to perform their action
+          - during the day, you use this command to vote for who to lynch
+`
+        game.sendMessage('lobby', helpText)
+        break
       case 'start':
         game.startLookingForPlayers()  
+        break
+      case 'leave':
+        game.removePlayer(message.member)  
         break
       case 'join':
         const user = message.member
@@ -71,110 +106,41 @@ class GameManager {
         this.handleVote(game, message, args[0])
         break
       // debug stuff
-      case 'fill':
-        this.fillWithFakePlayers(game, guild)
-        break
-      case 'ins':
-        inspect(game.roles)
-        break
-      case 'qs':
-        game.startLookingForPlayers()  
-        this.fillWithFakePlayers(game, guild)
-        const myID = '164469337258721280'
-        const myRef = guild.members.find(m => m.id === myID)
-        game.addPlayer(myRef, myRef.user.id, myRef.user.username)  
-        break
-      // force complete all votes
-      case 'qv':
-        // TODO:
-        // game.forceCompleteAllVotes()
-        break
-      case 'phasen':
-        game.setPhase(Phase.Night)
-        break
-      case 'phased':
-        game.setPhase(Phase.Day)
-        break
+      // case 'fill':
+      //   this.fillWithFakePlayers(game, guild)
+      //   break
+      // case 'ins':
+      //   inspect(game.roles)
+      //   break
+      // case 'qs':
+      //   game.startLookingForPlayers()  
+      //   this.fillWithFakePlayers(game, guild)
+      //   const myID = '164469337258721280'
+      //   const myRef = guild.members.find(m => m.id === myID)
+      //   game.addPlayer(myRef, myRef.user.id, myRef.user.username)  
+      //   break
+      // // force complete all votes
+      // case 'qv':
+      //   game.forceCompleteNightVotes()
+      //   break
+      // case 'qvd':
+      //   game.forceCompleteDayVotes()
+      //   break
+      // case 'bulkdelete':
+      //   message.channel.bulkDelete(100)
+      //   break
       }
+        
     })
   }
 
   handleVote(game: Game, message: Discord.Message, voteName: string) {
-    switch (game.phase) {
-      case Phase.Pregame:
-        game.sendMessage('lobby', 'No game is in progress')
-        break;
-      case Phase.Night:
-        const author = message.author
-
-        // find in game player and check if his role can vote
-        let player = game.findPlayer(author.id)
-        if (!player) {
-          return
-        }
-        // player cannot vote
-        if (!player.role.canVote) {
-          return
-        }
-        // player posted message in a different channel than his role (should not happen)
-        if (player.role.channel.id !== message.channel.id) {
-          message.channel.send(`${author}, you should not be able to see or type in this channel, please report this bug`)
-          return
-        }
-
-        let roleVoting = game.voting[player.role.name]
-        // find vote destination player by name
-        let voteMember = game.findPlayerByName(voteName)
-        
-        if (!voteMember) {
-          player.role.channel.send(`${author}, could not find a player named ${voteName}`)
-          return
-        }
-        if (roleVoting.alreadyVoted[player.id]) {
-          player.role.channel.send(`${author}, you have already voted`)
-          return
-        }
-
-        const voteID = voteMember.id
-        if (!(voteID in roleVoting.votes)) {
-          player.role.channel.send(`${author}, you cannot vote for ${voteMember.id}`)
-          return
-        }
-
-        // increment how many votes this player has
-        roleVoting.votes[voteID]++
-        // set author already voted true
-        roleVoting.alreadyVoted[player.id] = true
-
-        player.role.channel.send(`${author} has voted for ${voteMember.id}`)
-
-        // check if vote completed for this role
-        const totalVotes = game.getTotalVotesForRole(player.role)
-        if (totalVotes === player.role.limit) {
-          roleVoting.isCompleted = true
-          player.role.channel.send(`Vote completed in channel ${player.role.channel}`)
-        }
-      
-        // check if all roles completed their votes
-        if (game.areAllVotesCompleted()) {
-          game.sendMessage('lobby', 'All votes completed, performing action')
-
-          game.performAllVoteActions()
-        }
-
-        break;
-      case Phase.Day:
-        // lynch
-        game.sendMessage('Day', 'supposed to lynch here')
-        break;
-      default:
-        break;
-    }
+    game.handleVote(message.channel.id, message.author.id, voteName)
   }
 
   fillWithFakePlayers(game: Game, guild: Discord.Guild) {
     FakePlayers.forEach(p => {
-      const fakeUser = new Discord.GuildMember(guild, { id: '<none>' })
+      const fakeUser = new Discord.GuildMember(guild, { nickname: p.name, id: p.id, user: { id: p.id } })
       game.addPlayer(fakeUser, p.id, p.name)  
     })
   }

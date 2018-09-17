@@ -16,12 +16,14 @@ export class Role {
   guild: Discord.Guild
   discordRole: Discord.Role
   name: string
-  isGameRole: boolean
-  canVote: boolean // if this role can vote (doesn't mean that it can vote if it has already voted)
+  isNightRole: boolean
+  canVoteNight: boolean // if this role can vote (doesn't mean that it can vote if it has already voted)
+  canVoteDay: boolean;
   channel: Channel
   type: RoleType
   leftToAssign: number
   limit: number
+  isInnocent: boolean
 
   async uppercaseDiscordChannelName(channel: Discord.Channel) {
     let name = (<Discord.TextChannel>channel).name
@@ -35,17 +37,27 @@ export class Role {
     this.discordRole = this.guild.roles.find(ro => ro.id === cfg.id)!
     this.channel = (<Channel>this.guild.channels.find(ch => ch.id === cfg.channelID)!)
     this.name = this.discordRole.name
-    this.isGameRole = cfg.isGameRole
+    this.isNightRole = cfg.isGameRole
     this.type = cfg.type
     this.limit = cfg.maximumAssigned
     this.leftToAssign = cfg.maximumAssigned
 
-    this.canVote = true
+    this.canVoteNight = true
+    this.canVoteDay = false
+    this.isInnocent = true
     switch (this.type) {
     case RoleType.None:
+    case RoleType.Day:
     case RoleType.Villager:
-      this.canVote = false
-      break;
+      this.canVoteNight = false
+      break
+    case RoleType.Mafia:
+      this.isInnocent = false
+      break
+    }
+
+    if (this.type === RoleType.Day) {
+      this.canVoteDay = true
     }
   }
 }

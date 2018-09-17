@@ -1,7 +1,8 @@
 import Discord from 'discord.js'
-import { FakePlayers, MyselfID } from './mock'
-import { getRandomInt } from './util'
+// import { FakePlayers, MyselfID } from './mock'
+import { getRandomInt, inspect, shuffle } from './util'
 import { Role, RoleType, Channel } from './role'
+import GameManager from './game-manager'
 
 interface UnassignedPlayer {
   member: Discord.GuildMember
@@ -21,6 +22,8 @@ export enum Phase {
 
 // A game on one server
 export class Game {
+  manager: GameManager
+
   guild: Discord.Guild
   // bot prefix. configurable per server
   prefix: string = '.'
@@ -48,9 +51,11 @@ export class Game {
       alreadyVoted: { [index:string]: boolean }
     }
   }
-  murderTarget: Player | null;
+  murderTarget: Player | null
+  investigation: { target: Player | null, isInnocent: boolean }
 
-  constructor(guild: Discord.Guild, roles: Role[]) {
+  constructor(manager: GameManager, guild: Discord.Guild, roles: Role[]) {
+    this.manager = manager
     this.guild = guild
     this.roles = roles
     this.channelCache = {}
@@ -63,6 +68,10 @@ export class Game {
     this.isGameStarted = false
     this.voting = {}
     this.murderTarget = null
+    this.investigation = {
+      target: null,
+      isInnocent: false,
+    }
   }
 
   findRole(name: string): Role {
@@ -76,12 +85,100 @@ export class Game {
   }
 
   findChannelByID(channelID: string) {
-    return this.guild.channels.find(ch => ch.id === channelID)!
+    return (<Discord.TextChannel>this.guild.channels.find(ch => ch.id === channelID)!)
   }
 
-  sendMessage(roleName: string, contents: string) {
+  async sendMessage(roleName: string, contents: string) {
     const role = this.findRole(roleName)
-    role.channel.send(contents)
+    await role.channel.send(contents)
+  }
+
+  addVote(player: Player, voteName: string) {
+    let whichRole = null
+    if (this.phase === Phase.Night) {
+      whichRole = player.role
+    } else {
+      whichRole = this.roles.find(ro => ro.type === RoleType.Day)!
+    }
+
+    let roleVoting = this.voting[whichRole.name]
+    // find vote destination player by name
+    let voteMember = this.findPlayerByName(voteName)
+    
+    if (!voteMember) {
+      whichRole.channel.send(`${player.member}, could not find a player named ${voteName}`)
+      return
+    }
+    if (roleVoting.alreadyVoted[player.id]) {
+      whichRole.channel.send(`${player.member}, you have already voted`)
+      return
+    }
+
+    const voteID = voteMember.id
+    if (!(voteID in roleVoting.votes)) {
+      whichRole.channel.send(`${player.member}, you cannot vote for ${voteMember}`)
+      return
+    }
+
+    // increment how many votes this player has
+    roleVoting.votes[voteID]++
+    // set author already voted true
+    roleVoting.alreadyVoted[player.id] = true
+
+    whichRole.channel.send(`${player.member} has voted for ${voteMember}`)
+
+    // check if vote completed for this role
+    // if night, get total votes for player's role
+    // if day, get total votes for day role
+    const totalVotes = this.getTotalVotesForRole(whichRole)
+    const roleCount = this.getRoleCount(whichRole)
+    
+    if (totalVotes === roleCount) {
+      roleVoting.isCompleted = true
+      whichRole.channel.send(`Vote completed in channel ${whichRole.channel}`)
+    }
+  
+    // check if all roles completed their votes
+    if (this.areAllVotesCompleted()) {
+      this.sendMessage('lobby', 'All votes completed, performing action')
+
+      this.performAllVoteActions()
+    }
+  }
+
+  getRoleCount(role: Role): number {
+    // day means all (alive) players
+    if (role.type === RoleType.Day) {
+      return this.players.length
+    }
+    return this.players.filter(pl => pl.role.type === role.type).length
+  }
+
+  handleVote(channelID: string, authorID: string, voteName: string) {
+    // find in this player and check if his role can vote
+    let player = this.findPlayer(authorID)
+    if (!player) {
+      return
+    }
+    switch (this.phase) {
+      case Phase.Pregame:
+        this.sendMessage('lobby', 'No game is in progress')
+        break;
+      case Phase.Night:
+        // player cannot vote
+        if (!player.role.canVoteNight) {
+          return
+        }
+
+        this.addVote(player, voteName)
+        break;
+      // lynch
+      case Phase.Day:
+        this.addVote(player, voteName)
+        break;
+      default:
+        break;
+    }
   }
 
   startLookingForPlayers() {
@@ -102,6 +199,56 @@ export class Game {
     this.sendMessage('lobby', `Starting new game: looking for ${this.playerLimit} players...`)
   }
 
+  forceCompleteDayVotes() {
+    // find first villager
+    let targetName = ''
+    for (let player of this.players) {
+      if (player.role.type === RoleType.Villager) {
+        targetName = player.name
+        break
+      }
+    }
+
+    for (let player of this.players) {
+      // TODO: debug stuff
+      // don't force vote for myself
+      // if (player.id === MyselfID) {
+      //   continue
+      // }
+      
+      this.handleVote(player.role.channel.id, player.id, targetName)
+    }
+  }
+
+  forceCompleteNightVotes(): any {
+    // find first villager
+    let targetName = ''
+    for (let player of this.players) {
+      if (player.role.type === RoleType.Villager) {
+        targetName = player.name
+        break
+      }
+    }
+
+    for (let player of this.players) {
+      if (!player.role.canVoteNight) {
+        continue
+      }
+      // TODO: debug stuff
+      // don't force vote for myself
+      // if (player.id === MyselfID) {
+      //   continue
+      // }
+      // doctor bot targets himself
+      if (player.role.type === RoleType.Doctor) {
+        this.handleVote(player.role.channel.id, player.id, player.name)
+        continue
+      }
+      
+      this.handleVote(player.role.channel.id, player.id, targetName)
+    }
+  }
+
   start() {
     this.isLookingForPlayers = false
     this.isGameStarted = true
@@ -118,29 +265,36 @@ export class Game {
   async movePlayerToNightChannel(player: Player) {
     const discordRole = player.role.discordRole
     
-    console.log('adding', player.role.name, 'to', player.name)
     await player.member.removeRoles(player.member.roles)
     await player.member.addRole(discordRole)
   }
 
   async movePlayerToDayChannel(player: Player) {
-    this.roles.find(ro => ro.type === RoleType.Day)
-    const discordRole = player.role.discordRole
+    let dayRole = this.roles.find(ro => ro.type === RoleType.Day)!
+    const discordRole = dayRole.discordRole
     
-    console.log('adding', player.role.name, 'to', player.name)
     await player.member.removeRoles(player.member.roles)
     await player.member.addRole(discordRole)
   }
 
-  setPhase(phase: Phase) {
+  async setPhase(phase: Phase) {
     this.sendMessage('lobby', `Setting phase: ${Phase[phase]}`)
     this.phase = phase
+
+    this.checkIfGameover()
 
     // reset voting
     this.voting = {}
     for (let role of this.roles) {
-      if (!role.canVote) {
-        continue
+      if (phase === Phase.Night) {
+        if (!role.canVoteNight) {
+          continue
+        }
+      }
+      if (phase === Phase.Day) {
+        if (!role.canVoteDay) {
+          continue
+        }
       }
 
       this.voting[role.name] = {
@@ -157,9 +311,10 @@ export class Game {
       }
 
       // TODO: maybe make async
-      role.channel.bulkDelete(100)
+      // role.channel.bulkDelete(100)
 
-      if (role.canVote) {
+      if (this.phase === Phase.Night && role.canVoteNight
+       || this.phase === Phase.Day && role.canVoteDay) {
         this.setVoteOptions(role.name)
       }
     }
@@ -171,7 +326,11 @@ export class Game {
           continue
         }
 
-        this.movePlayerToNightChannel(player)
+        await this.movePlayerToNightChannel(player)
+
+        if (player.role.canVoteNight) {
+          this.status(player.role)
+        }
       }
     } else if (phase === Phase.Day) {
       for (let player of this.players) {
@@ -179,16 +338,9 @@ export class Game {
           continue
         }
 
-        this.movePlayerToDayChannel(player)
+        await this.movePlayerToDayChannel(player)
       }
-    }
-
-    // print statuses
-    for (let role of this.roles) {
-      if (!role.canVote) {
-        continue
-      }
-      this.status(role)
+      this.status(this.findRole('day'))
     }
   }
 
@@ -197,44 +349,44 @@ export class Game {
   // happens when a phase is set.
   // moves unassigned players to the assigned player list
   randomlyAssignRoles() {
-    const DebugForce = true
+    const DebugForce = false
 
-    let assignableRoles = [...this.roles.filter(ro => ro.isGameRole)!]
+    let assignableRoles = [...this.roles.filter(ro => ro.isNightRole)!]
     
 
     // TODO: debug remove
     // force role on myself
-    if (DebugForce) {
-      const roleToForce = RoleType.Doctor
+    // if (DebugForce) {
+    //   const roleToForce = RoleType.Cop
 
-      const myselfPlayer = this.unassignedPlayers.find(pl => pl.id === MyselfID)!
-      if (myselfPlayer.id === MyselfID) {
-        let forcedRole = assignableRoles.find(ro => ro.type === roleToForce)!
-        let forcedRoleIdx = assignableRoles.findIndex(ro => ro.type === roleToForce)!
+    //   const myselfPlayer = this.unassignedPlayers.find(pl => pl.id === MyselfID)!
+      // if (myselfPlayer.id === MyselfID) {
+      //   let forcedRole = assignableRoles.find(ro => ro.type === roleToForce)!
+      //   let forcedRoleIdx = assignableRoles.findIndex(ro => ro.type === roleToForce)!
 
-        myselfPlayer.role = forcedRole
-        this.players.push({
-          ...myselfPlayer,
-          role: myselfPlayer.role
-        })
+      //   myselfPlayer.role = forcedRole
+      //   this.players.push({
+      //     ...myselfPlayer,
+      //     role: myselfPlayer.role
+      //   })
 
-        // decrement role amount
-        forcedRole.leftToAssign--
+      //   // decrement role amount
+      //   forcedRole.leftToAssign--
 
-        if (forcedRole.leftToAssign === 0) {
-          assignableRoles.splice(forcedRoleIdx, 1)
-        }
-      }
-    }
+      //   if (forcedRole.leftToAssign === 0) {
+      //     assignableRoles.splice(forcedRoleIdx, 1)
+      //   }
+      // }
+    // }
 
     for (let i = 0; i < this.playerLimit; i++) {
       let uap = this.unassignedPlayers[i]
       // we're forcing outselves into a role, don't add again
-      if (DebugForce) {
-        if (uap.id === MyselfID) {
-          continue
-        }
-      }
+      // if (DebugForce) {
+      //   if (uap.id === MyselfID) {
+      //     continue
+      //   }
+      // }
 
       // get random role
       const randomRoleIdx = getRandomInt(assignableRoles.length)
@@ -266,6 +418,14 @@ export class Game {
       return
     }
 
+    // during the day, everyone can vote for everyone
+    if (roleType === RoleType.Day) {
+      this.players.forEach(pl => {
+        this.voting[roleName].votes[pl.id] = 0
+      })
+      return
+    }
+
     // doctor can vote for himself, others cannot
     if (roleType === RoleType.Doctor) {
       this.players.forEach(pl => {
@@ -281,10 +441,10 @@ export class Game {
   }
 
   findPlayerByName(name: string) {
-    let fakePlayer = FakePlayers.find(fp => fp.name === name)!
-    if (fakePlayer) {
-      return FakePlayers.find(fp => fp.id === fakePlayer.id)
-    }
+    // let fakePlayer = FakePlayers.find(fp => fp.name === name)!
+    // if (fakePlayer) {
+    //   return FakePlayers.find(fp => fp.id === fakePlayer.id)
+    // }
 
     return this.guild.members
       .find(m => m.user.username.toLowerCase() === name.toLowerCase())
@@ -323,21 +483,35 @@ export class Game {
     // find max votes
     let maxVotes = -1
     let maxVotesPlayerID = ''
-    for (let playerID in roleVoting) {
+
+    // move votes into array
+    let votesArr = []
+    for (let playerID in roleVoting.votes) {
       let amount = roleVoting.votes[playerID]
-      if (amount > maxVotes) {
-        maxVotes = amount
-        maxVotesPlayerID = playerID
+      votesArr.push({
+        playerID: playerID,
+        amount: amount,
+      })
+    }
+    // get random max vote
+    votesArr = shuffle(votesArr)
+
+    for (let vote of votesArr) {
+      if (vote.amount > maxVotes) {
+        maxVotes = vote.amount
+        maxVotesPlayerID = vote.playerID
       }
     }
+    
     return this.findPlayer(maxVotesPlayerID)!
   }
 
-  performVoteAction(role: Role) {
+  prepareVoteAction(role: Role) {
     let actionDestPlayer = this.getWinningVote(role)
     
     switch (role.type) {
       // mark someone for death
+      case RoleType.Day:
       case RoleType.Mafia:
         this.murderTarget = actionDestPlayer
         break;
@@ -347,33 +521,124 @@ export class Game {
         this.murderTarget = null
         break;
       case RoleType.Cop:
-        throw new Error('unimplmented cop action')
-        break;
+        const isTargetInnocent = actionDestPlayer.role.isInnocent
+        
+        this.investigation.target = actionDestPlayer
+        this.investigation.isInnocent = isTargetInnocent
+        break
       default:
-        break;
+        break
     }
   }
 
-  performAllVoteActions() {
+  performLynching() {
+    if (!this.murderTarget) {
+      throw new Error('didnt have lynch target')
+    }
+
+    let playerIdx = this.players.findIndex(pl => {
+      return pl.id === this.murderTarget!.id
+    })!
+    // remove target from player array
+    this.players.splice(playerIdx, 1)
+  }
+
+  async performAllNightActions() {
     // doctor needs to act last, so type out order manually
-    this.performVoteAction(this.findRole('mafia'))
-    this.performVoteAction(this.findRole('cop'))
-    this.performVoteAction(this.findRole('doctor'))
+    this.prepareVoteAction(this.findRole('mafia'))
+    this.prepareVoteAction(this.findRole('cop'))
+    this.prepareVoteAction(this.findRole('doctor'))
 
     let murdered = this.maybePerformMurder()
-    this.setPhase(Phase.Day)
-    if (murdered && this.murderTarget) {
-      // TODO: if shouldRevealRole
-      this.sendMessage('day', `${this.murderTarget.id} was murdered`)
+
+    for (let role of this.roles) {
+      if (!role.canVoteNight) {
+        continue
+      }
+
+      await role.channel.send('All votes complete. Day begins in 5 seconds')
     }
+
+    setTimeout(async () => {
+      this.setPhase(Phase.Day)
+
+      // murder results
+      if (murdered && this.murderTarget) {
+        // TODO: if shouldRevealRole
+        this.sendMessage('day', `${this.murderTarget.member}, the ${this.murderTarget.role.name} was murdered`)
+      }
+      if (!murdered) {
+        this.sendMessage('day', `Nobody was murdered last night`)
+      }
+      this.murderTarget = null
+
+      // DM investigation results to cop
+      let copPlayer = this.players.find(pl => pl.role.type === RoleType.Cop)!
+      let dm = await copPlayer.member.createDM()
+      const investigationResult =
+  `Your investigation reveals that ${this.investigation.target!.name} is ${this.investigation.isInnocent ? 'innocent' : 'guilty'}`
+      await dm.send(investigationResult)
+      this.investigation = { target: null, isInnocent: false }
+    }, 5000)
+  }
+
+  async performAllDayActions() {
+    this.prepareVoteAction(this.findRole('day'))
+
+    this.performLynching()
+
+
+    // lynch results
+    if (this.murderTarget) {
+      await this.sendMessage('day', `${this.murderTarget.member}, the ${this.murderTarget.role.name} was murdered\nNight begins in 5 seconds`)
+    }
+
     this.murderTarget = null
+
+    setTimeout(() => {
+      this.setPhase(Phase.Night)
+    }, 5000)
+  }
+
+  async performAllVoteActions() {
+    if (this.phase === Phase.Night) {
+      await this.performAllNightActions()
+    } else {
+      this.performAllDayActions()
+    }
+  }
+
+  checkIfGameover() {
+    const mafiaCount = this.players.filter(pl => pl.role.isInnocent === false).length
+    const innoCount = this.players.filter(pl => pl.role.isInnocent === true).length
+
+    let endGame = async () => {
+      await this.guild.members.forEach(async mbmr => {
+        await mbmr.removeRoles(mbmr.roles)
+      }) 
+      this.manager.endGame(this)
+    }
+
+    if (mafiaCount === 0) {
+      this.sendMessage('lobby', 'The village has won!')
+      endGame()
+      return
+    } else if (mafiaCount > innoCount) {
+      this.sendMessage('lobby', 'The mafia has won!')
+      endGame()
+      return
+    }
   }
 
   // kill mafia vote target if doctor didn't save
   // returns if someone died or not
   maybePerformMurder(): boolean {
     if (this.murderTarget) {
-      delete this.murderTarget
+      let playerIdx = this.players.findIndex(pl => {
+        return pl.id === this.murderTarget!.id
+      })!
+      // remove target from player array
+      this.players.splice(playerIdx, 1)
       return true
     }
     return false
@@ -394,7 +659,10 @@ export class Game {
     let totalCanVote = 0
     let totalCompleted = 0
     for (let role of this.roles) {
-      if (!role.canVote) {
+      if (this.phase === Phase.Night && !role.canVoteNight) {
+        continue
+      }
+      if (this.phase === Phase.Day && !role.canVoteDay) {
         continue
       }
 
@@ -421,13 +689,10 @@ Looking for ${this.playerLimit - this.unassignedPlayers.length} more players`
 
     switch (this.phase) {
     case Phase.Day:
-      switch (role.type) {
-      case RoleType.Mafia:
-      case RoleType.Cop:
-      case RoleType.Doctor:
-        throw new Error('someone posted in a night channel during the day')            
-      }
-      // lynch status
+      let dayStatusText = `It is daytime.\n\nVote for who to lynch today by doing \`.vote <name>\`\n\nOptions are:\n`
+      dayStatusText += this.getCastVotes(role) + '\n'
+
+      role.channel.send(dayStatusText)
       break
     case Phase.Night:
       switch (role.type) {
@@ -437,13 +702,17 @@ Looking for ${this.playerLimit - this.unassignedPlayers.length} more players`
 
         role.channel.send(mafiaStatusText)
         break
-      case RoleType.Cop:
-        break
       case RoleType.Doctor:
         let doctorStatusText = `You are the doctor.\n\nVote for who to save tonight by doing \`.vote <name>\`\n\nOptions are:\n`
         doctorStatusText += this.getCastVotes(role) + '\n'
 
         role.channel.send(doctorStatusText)
+        break
+      case RoleType.Cop:
+        let copStatusText = `You are the cop.\n\nVote for who to investigate tonight by doing \`.vote <name>\`\n\nOptions are:\n`
+        copStatusText += this.getCastVotes(role) + '\n'
+
+        role.channel.send(copStatusText)
         break
       case RoleType.Day:
         // do nothing
@@ -453,6 +722,15 @@ Looking for ${this.playerLimit - this.unassignedPlayers.length} more players`
         break
       }
       break
+    }
+  }
+
+  removePlayer(member: Discord.GuildMember) {
+    let playerIdx = this.unassignedPlayers.findIndex(player => player.id === member.id)
+    if (playerIdx != -1) {
+      this.unassignedPlayers.splice(playerIdx, 1)
+      this.sendMessage('lobby', 'You have left the queue')
+      return
     }
   }
 

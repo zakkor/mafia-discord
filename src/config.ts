@@ -26,7 +26,7 @@ export const gameConfigInstance: GameConfig = {
       type: RoleType.Day,
       channelID: '489727884634619904',
       isGameRole: false,
-      maximumAssigned: -1
+      maximumAssigned: 7
     },
     {
       id: '489106307832610836',
