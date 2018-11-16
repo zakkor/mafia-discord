@@ -6,7 +6,7 @@ SourceMap.install()
 process.on('unhandledRejection', console.log);
 
 const client = new Discord.Client()
-const BOT_TOKEN = 'NDg5MjA0OTM4MzU4OTE1MDky.DnnXXg.qDVy7_tv9cwfKJKEmdgzV5tRFRw'
+const BOT_TOKEN = 'NDg5MjA0OTM4MzU4OTE1MDky.DoGCeQ.WmJNqs40nKjG0j7yaVqeSaaLItk'
 
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`)

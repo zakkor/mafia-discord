@@ -3,11 +3,26 @@
   "scripts": {
     "watch": "tsc-watch --onSuccess \"node ./dist/src/index.js\"",
     "build": "tsc",
-    "start": "node dist/src/index.js"
+    "start": "node dist/src/index.js",
+    "test": "jest --watch"
   },
   "version": "1.0.0",
   "main": "index.js",
   "license": "MIT",
+  "jest": {
+    "transform": {
+      "^.+\\.tsx?$": "ts-jest"
+    },
+    "testRegex": "(/__tests__/.*|(\\.|/)(test|spec))\\.(jsx?|tsx?)$",
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js",
+      "jsx",
+      "json",
+      "node"
+    ]
+  },
   "dependencies": {
     "@types/node": "^10.9.4",
     "@types/ramda": "^0.25.38",
@@ -18,8 +33,11 @@
     "safe-json-stringify": "^1.2.0"
   },
   "devDependencies": {
+    "@types/jest": "^23.3.2",
+    "jest": "^23.6.0",
     "nodemon": "^1.18.4",
     "source-map-support": "^0.5.9",
+    "ts-jest": "^23.1.4",
     "tsc-watch": "^1.0.27",
     "typescript": "^3.0.3"
   }

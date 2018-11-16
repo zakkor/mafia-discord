@@ -96,8 +96,22 @@ Commands:
         const playerName = user.user.username
         game.addPlayer(user, playerID, playerName)  
         break
+      case 'givelobby':
+        guild.members.forEach(async me => {
+          try {
+            await me.removeRoles(me.roles)
+            await me.addRole(game.findRole('lobby').discordRole)
+          } catch(e) {
+            // don't care
+          }
+        })
+        break
       case 'status':
-        game.status(game.findRole((<Discord.TextChannel>message.channel).name))
+        try {
+          game.status(game.findRole((<Discord.TextChannel>message.channel).name))
+        } catch(err) {
+          console.log('status is fucked:', err)
+        }
         break
       case 'vote':
         if (args.length === 0) {

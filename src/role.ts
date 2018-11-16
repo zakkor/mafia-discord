@@ -37,7 +37,7 @@ export class Role {
     this.discordRole = this.guild.roles.find(ro => ro.id === cfg.id)!
     this.channel = (<Channel>this.guild.channels.find(ch => ch.id === cfg.channelID)!)
     this.name = this.discordRole.name
-    this.isNightRole = cfg.isGameRole
+    this.isNightRole = cfg.isNightRole
     this.type = cfg.type
     this.limit = cfg.maximumAssigned
     this.leftToAssign = cfg.maximumAssigned
